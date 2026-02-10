@@ -59,7 +59,6 @@ export function SubmissionForm() {
   const [initData, setInitData] = useState<string | null>(null)
   const [telegramUserId, setTelegramUserId] = useState<number | null>(null)
   const [isTelegram, setIsTelegram] = useState(false)
-  const [webOverride, setWebOverride] = useState(false)
 
   const {
     register,
@@ -108,7 +107,7 @@ export function SubmissionForm() {
   const telegramStatus = useMemo(() => {
     if (isTelegram && telegramUserId) return `Telegram foydalanuvchisi: ${telegramUserId}`
     if (isTelegram) return "Telegram ochildi, foydalanuvchi aniqlanmadi"
-    return "Telegram orqali ochilmagan"
+    return "Telegram orqali ochilmagan — vebda yuborishingiz mumkin"
   }, [isTelegram, telegramUserId])
 
   const onSubmit = async (_data: FormData) => {
@@ -206,24 +205,10 @@ export function SubmissionForm() {
                   isTelegram ? "border-emerald-500/60 text-emerald-700 dark:text-emerald-300" : "border-amber-500/60"
                 )}
               >
-                <div className="flex items-center justify-between gap-2">
-                  <span>{telegramStatus}</span>
-                  {!isTelegram && (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      className="h-8 px-3 text-xs"
-                      onClick={() => setWebOverride(true)}
-                    >
-                      Vebda davom etish
-                    </Button>
-                  )}
-                </div>
-                {!isTelegram && !webOverride && (
+                <span>{telegramStatus}</span>
+                {isTelegram && !initData && (
                   <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">
-                    Iltimos, formani Telegram ichida oching. Zarurat bo'lsa, yuqoridagi tugma orqali vebda davom
-                    etishingiz mumkin.
+                    Telegram sessiyasi aniqlanmadi. Ilovani qayta oching yoki ruxsat bering.
                   </p>
                 )}
               </div>
@@ -434,7 +419,7 @@ export function SubmissionForm() {
                 ) : (
                   <Button
                     type="submit"
-                    disabled={isSubmitting || (!isTelegram && !webOverride)}
+                    disabled={isSubmitting || (isTelegram && !initData)}
                     className="h-12 flex-1 rounded-xl text-sm font-medium"
                   >
                     {isSubmitting ? (
