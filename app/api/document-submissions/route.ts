@@ -47,6 +47,39 @@ function validateTelegramInitData(initData: string, botToken: string) {
   }
 }
 
+export async function GET(request: Request) {
+  try {
+    const { searchParams } = new URL(request.url)
+    const initData =
+      searchParams.get("initData") || request.headers.get("x-telegram-init") || undefined
+
+    if (!initData || !process.env.TELEGRAM_BOT_TOKEN) {
+      return NextResponse.json({ exists: false })
+    }
+
+    const { valid, userId } = validateTelegramInitData(initData, process.env.TELEGRAM_BOT_TOKEN)
+    if (!valid || !userId) {
+      return NextResponse.json({ exists: false })
+    }
+
+    const { data, error } = await supabase
+      .from("document_submissions")
+      .select("id")
+      .eq("telegram_chat_id", userId)
+      .limit(1)
+
+    if (error) {
+      console.error("Supabase select error (GET)", error)
+      return NextResponse.json({ message: "Tekshirishda xatolik" }, { status: 500 })
+    }
+
+    return NextResponse.json({ exists: !!data && data.length > 0 })
+  } catch (error) {
+    console.error("GET error", error)
+    return NextResponse.json({ message: "Unexpected error" }, { status: 500 })
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const formData = await request.formData()

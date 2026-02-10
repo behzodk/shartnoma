@@ -54,6 +54,8 @@ type FormData = z.infer<typeof formSchema>
 export function SubmissionForm() {
   const [step, setStep] = useState(0)
   const [isSubmitted, setIsSubmitted] = useState(false)
+  const [alreadySubmitted, setAlreadySubmitted] = useState(false)
+  const [checkingExisting, setCheckingExisting] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [initData, setInitData] = useState<string | null>(null)
@@ -121,13 +123,6 @@ export function SubmissionForm() {
     }
   }, [scriptLoaded])
 
-  const telegramStatus = useMemo(() => {
-    if (isTelegram && !tgReady) return "Telegram yuklanmoqda…"
-    if (isTelegram && telegramUserId) return `Telegram foydalanuvchisi: ${telegramUserId}`
-    if (isTelegram) return "Telegram ochildi, foydalanuvchi aniqlanmadi"
-    return "Telegram orqali ochilmagan — vebda yuborishingiz mumkin"
-  }, [isTelegram, telegramUserId, tgReady])
-
   const onSubmit = async (_data: FormData) => {
     setError(null)
     setIsSubmitting(true)
@@ -148,6 +143,10 @@ export function SubmissionForm() {
 
       if (!response.ok) {
         const { message } = await response.json().catch(() => ({ message: "Yuborishda xatolik yuz berdi" }))
+        if (response.status === 409) {
+          setAlreadySubmitted(true)
+          throw new Error("Siz allaqachon topshirdingiz")
+        }
         throw new Error(message || "Yuborishda xatolik yuz berdi")
       }
 
@@ -174,6 +173,45 @@ export function SubmissionForm() {
 
   const prevStep = () => {
     setStep((s) => Math.max(s - 1, 0))
+  }
+
+  // If Telegram + initData available, check if already submitted to avoid showing form
+  useEffect(() => {
+    const shouldCheck = isTelegram && tgReady && initData
+    if (!shouldCheck) return
+
+    const controller = new AbortController()
+    setCheckingExisting(true)
+    fetch(`/api/document-submissions?initData=${encodeURIComponent(initData!)}`, {
+      signal: controller.signal,
+    })
+      .then(async (res) => {
+        if (!res.ok) throw new Error("Tekshirishda xatolik")
+        const data = await res.json()
+        if (data?.exists) setAlreadySubmitted(true)
+      })
+      .catch((err) => {
+        console.error(err)
+      })
+      .finally(() => setCheckingExisting(false))
+
+    return () => controller.abort()
+  }, [initData, isTelegram, tgReady])
+
+  if (alreadySubmitted) {
+    return (
+      <div className="flex min-h-[100svh] items-center justify-center bg-background p-4">
+        <div className="flex w-full max-w-md flex-col items-center gap-6 rounded-2xl border border-border bg-card p-8 shadow-lg shadow-foreground/5 text-center">
+          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
+            <Check className="h-8 w-8 text-primary" />
+          </div>
+          <h2 className="text-xl font-semibold text-foreground">Siz allaqachon topshirdingiz</h2>
+          <p className="text-sm text-muted-foreground leading-relaxed">
+            Bu Telegram hisobidan ma'lumotlar yuborilgan. Agar yangilash kerak bo'lsa, administrator bilan bog'laning.
+          </p>
+        </div>
+      </div>
+    )
   }
 
   if (isSubmitted) {
@@ -222,19 +260,17 @@ export function SubmissionForm() {
             <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-5">
               <input type="hidden" name="initData" value={initData ?? ""} />
 
-              <div
-                className={cn(
-                  "rounded-xl border border-dashed border-border/70 bg-muted/40 px-4 py-3 text-xs text-muted-foreground",
-                  isTelegram ? "border-emerald-500/60 text-emerald-700 dark:text-emerald-300" : "border-amber-500/60"
-                )}
-              >
-                <span>{telegramStatus}</span>
-                {isTelegram && tgReady && !initData && (
-                  <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">
-                    Telegram sessiyasi aniqlanmadi. Ilovani qayta oching yoki ruxsat bering.
-                  </p>
-                )}
-              </div>
+              {telegramUserId && (
+                <p className="text-xs text-muted-foreground px-1">
+                  Telegram ID: {telegramUserId}
+                </p>
+              )}
+
+              {isTelegram && tgReady && !initData && (
+                <div className="rounded-xl border border-dashed border-amber-500/60 bg-amber-50/70 px-4 py-3 text-xs text-amber-800 dark:bg-amber-500/10 dark:text-amber-200">
+                  Telegram sessiyasi aniqlanmadi. Ilovani qayta oching yoki ruxsat bering.
+                </div>
+              )}
 
               {/* Step 1: Personal Info */}
               <div
