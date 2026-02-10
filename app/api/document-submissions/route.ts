@@ -47,11 +47,14 @@ function validateTelegramInitData(initData: string, botToken: string) {
   }
 }
 
+function getInitDataFromRequest(request: Request) {
+  const { searchParams } = new URL(request.url)
+  return searchParams.get("initData") || request.headers.get("x-telegram-init") || undefined
+}
+
 export async function GET(request: Request) {
   try {
-    const { searchParams } = new URL(request.url)
-    const initData =
-      searchParams.get("initData") || request.headers.get("x-telegram-init") || undefined
+    const initData = getInitDataFromRequest(request)
 
     if (!initData || !process.env.TELEGRAM_BOT_TOKEN) {
       return NextResponse.json({ exists: false })
@@ -64,7 +67,7 @@ export async function GET(request: Request) {
 
     const { data, error } = await supabase
       .from("document_submissions")
-      .select("id")
+      .select("id, first_name, last_name, university, program, doc_path")
       .eq("telegram_chat_id", userId)
       .limit(1)
 
@@ -73,7 +76,18 @@ export async function GET(request: Request) {
       return NextResponse.json({ message: "Tekshirishda xatolik" }, { status: 500 })
     }
 
-    return NextResponse.json({ exists: !!data && data.length > 0 })
+    const exists = !!data && data.length > 0
+    const submission = exists
+      ? {
+          firstName: data[0].first_name,
+          lastName: data[0].last_name,
+          university: data[0].university,
+          program: data[0].program,
+          docPath: data[0].doc_path,
+        }
+      : null
+
+    return NextResponse.json({ exists, submission })
   } catch (error) {
     console.error("GET error", error)
     return NextResponse.json({ message: "Unexpected error" }, { status: 500 })
@@ -156,6 +170,86 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true })
   } catch (error) {
     console.error("API error", error)
+    return NextResponse.json({ message: "Unexpected error" }, { status: 500 })
+  }
+}
+
+export async function PUT(request: Request) {
+  try {
+    const formData = await request.formData()
+    const initData = formData.get("initData")?.toString()
+    if (!initData || !process.env.TELEGRAM_BOT_TOKEN) {
+      return NextResponse.json({ message: "Telegram ma'lumotlari kerak" }, { status: 400 })
+    }
+
+    const { valid, userId } = validateTelegramInitData(initData, process.env.TELEGRAM_BOT_TOKEN)
+    if (!valid || !userId) {
+      return NextResponse.json({ message: "Telegram ma'lumotlari tasdiqlanmadi" }, { status: 401 })
+    }
+
+    const firstName = formData.get("firstName")?.toString()
+    const lastName = formData.get("lastName")?.toString()
+    const university = formData.get("university")?.toString()
+    const program = formData.get("program")?.toString()
+    const document = formData.get("document")
+
+    if (!firstName || !lastName || !university || !program) {
+      return NextResponse.json({ message: "Majburiy maydonlar to'ldirilmagan" }, { status: 400 })
+    }
+
+    const { data: existing, error: selectError } = await supabase
+      .from("document_submissions")
+      .select("id, doc_path")
+      .eq("telegram_chat_id", userId)
+      .limit(1)
+
+    if (selectError) {
+      console.error("Supabase select error (PUT)", selectError)
+      return NextResponse.json({ message: "Tekshirishda xatolik" }, { status: 500 })
+    }
+
+    if (!existing || existing.length === 0) {
+      return NextResponse.json({ message: "Topilmadi" }, { status: 404 })
+    }
+
+    let docPath = existing[0].doc_path as string | null
+
+    if (document instanceof File) {
+      const safeFileName = document.name.replace(/[^a-zA-Z0-9.-]/g, "_")
+      const filePath = `documents/${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safeFileName}`
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from("shartnoma_zip")
+        .upload(filePath, document, {
+          contentType: document.type || "application/zip",
+          upsert: false,
+        })
+
+      if (uploadError || !uploadData?.path) {
+        console.error("Supabase upload error (PUT)", uploadError)
+        return NextResponse.json({ message: "Faylni yuklashda xatolik" }, { status: 500 })
+      }
+      docPath = uploadData.path
+    }
+
+    const { error: updateError } = await supabase
+      .from("document_submissions")
+      .update({
+        first_name: firstName,
+        last_name: lastName,
+        university,
+        program,
+        doc_path: docPath,
+      })
+      .eq("telegram_chat_id", userId)
+
+    if (updateError) {
+      console.error("Supabase update error", updateError)
+      return NextResponse.json({ message: "Yangilashda xatolik" }, { status: 500 })
+    }
+
+    return NextResponse.json({ ok: true, docPath })
+  } catch (error) {
+    console.error("PUT error", error)
     return NextResponse.json({ message: "Unexpected error" }, { status: 500 })
   }
 }

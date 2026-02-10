@@ -35,6 +35,12 @@ declare global {
   }
 }
 
+const documentSchema = z
+  .custom<File>((val) => val instanceof File, { message: "Fayl yuklang" })
+  .refine((file) => file && file.name.toLowerCase().endsWith(".zip"), {
+    message: ".zip faylini yuklang",
+  })
+
 const formSchema = z.object({
   firstName: z.string().min(2, "Ism kamida 2 ta harf bo'lishi kerak"),
   lastName: z.string().min(2, "Familiya kamida 2 ta harf bo'lishi kerak"),
@@ -42,14 +48,18 @@ const formSchema = z.object({
   program: z.enum(["bachelors", "masters", "phd"], {
     required_error: "Dastur turini tanlang",
   }),
-  document: z
-    .custom<File>((val) => val instanceof File, { message: "Fayl yuklang" })
-    .refine((file) => file && file.name.toLowerCase().endsWith(".zip"), {
-      message: ".zip faylini yuklang",
-    }),
+  document: documentSchema.optional(),
 })
 
 type FormData = z.infer<typeof formSchema>
+
+type ExistingSubmission = {
+  firstName: string
+  lastName: string
+  university: string
+  program: "bachelors" | "masters" | "phd"
+  docPath: string | null
+}
 
 export function SubmissionForm() {
   const [step, setStep] = useState(0)
@@ -63,12 +73,15 @@ export function SubmissionForm() {
   const [isTelegram, setIsTelegram] = useState(false)
   const [tgReady, setTgReady] = useState(false)
   const [scriptLoaded, setScriptLoaded] = useState(false)
+  const [existingSubmission, setExistingSubmission] = useState<ExistingSubmission | null>(null)
+  const [editingExisting, setEditingExisting] = useState(false)
 
   const {
     register,
     handleSubmit,
     trigger,
     setValue,
+    setError,
     watch,
     formState: { errors },
   } = useForm<FormData>({
@@ -127,30 +140,51 @@ export function SubmissionForm() {
     setError(null)
     setIsSubmitting(true)
 
+    if (!existingSubmission && !_data.document) {
+      setError("document", { type: "manual", message: "Fayl yuklang" })
+      setIsSubmitting(false)
+      return
+    }
+
     try {
       const formData = new FormData()
       formData.append("firstName", _data.firstName)
       formData.append("lastName", _data.lastName)
       formData.append("university", _data.university)
       formData.append("program", _data.program)
-      formData.append("document", _data.document)
+      if (_data.document) {
+        formData.append("document", _data.document)
+      }
       formData.append("initData", initData || "")
 
+      const isUpdate = !!existingSubmission
       const response = await fetch("/api/document-submissions", {
-        method: "POST",
+        method: isUpdate ? "PUT" : "POST",
         body: formData,
       })
 
+      const resJson = await response.json().catch(() => ({}))
+
       if (!response.ok) {
-        const { message } = await response.json().catch(() => ({ message: "Yuborishda xatolik yuz berdi" }))
         if (response.status === 409) {
           setAlreadySubmitted(true)
-          throw new Error("Siz allaqachon topshirdingiz")
+          throw new Error(resJson.message || "Siz allaqachon topshirdingiz")
         }
-        throw new Error(message || "Yuborishda xatolik yuz berdi")
+        throw new Error(resJson.message || "Yuborishda xatolik yuz berdi")
       }
 
       setIsSubmitted(true)
+      if (isUpdate) {
+        setExistingSubmission({
+          firstName: _data.firstName,
+          lastName: _data.lastName,
+          university: _data.university,
+          program: _data.program,
+          docPath: resJson.docPath ?? existingSubmission?.docPath ?? null,
+        })
+        setEditingExisting(false)
+        setAlreadySubmitted(true)
+      }
     } catch (err) {
       console.error(err)
       const friendly = err instanceof Error ? err.message : "Xatolik yuz berdi. Iltimos, qayta urinib ko'ring."
@@ -188,7 +222,22 @@ export function SubmissionForm() {
       .then(async (res) => {
         if (!res.ok) throw new Error("Tekshirishda xatolik")
         const data = await res.json()
-        if (data?.exists) setAlreadySubmitted(true)
+        if (data?.exists) {
+          setAlreadySubmitted(true)
+          if (data.submission) {
+            setExistingSubmission({
+              firstName: data.submission.firstName,
+              lastName: data.submission.lastName,
+              university: data.submission.university,
+              program: data.submission.program,
+              docPath: data.submission.docPath ?? null,
+            })
+            setValue("firstName", data.submission.firstName)
+            setValue("lastName", data.submission.lastName)
+            setValue("university", data.submission.university)
+            setValue("program", data.submission.program)
+          }
+        }
       })
       .catch((err) => {
         console.error(err)
@@ -198,7 +247,7 @@ export function SubmissionForm() {
     return () => controller.abort()
   }, [initData, isTelegram, tgReady])
 
-  if (alreadySubmitted) {
+  if (alreadySubmitted && !editingExisting && existingSubmission) {
     return (
       <div className="flex min-h-[100svh] items-center justify-center bg-background p-4">
         <div className="flex w-full max-w-md flex-col items-center gap-6 rounded-2xl border border-border bg-card p-8 shadow-lg shadow-foreground/5 text-center">
@@ -206,9 +255,20 @@ export function SubmissionForm() {
             <Check className="h-8 w-8 text-primary" />
           </div>
           <h2 className="text-xl font-semibold text-foreground">Siz allaqachon topshirdingiz</h2>
-          <p className="text-sm text-muted-foreground leading-relaxed">
-            Bu Telegram hisobidan ma'lumotlar yuborilgan. Agar yangilash kerak bo'lsa, administrator bilan bog'laning.
-          </p>
+          <div className="w-full text-left text-sm text-muted-foreground space-y-2">
+            <p><span className="font-medium text-foreground">Ism:</span> {existingSubmission.firstName}</p>
+            <p><span className="font-medium text-foreground">Familiya:</span> {existingSubmission.lastName}</p>
+            <p><span className="font-medium text-foreground">Universitet:</span> {existingSubmission.university}</p>
+            <p><span className="font-medium text-foreground">Dastur:</span> {existingSubmission.program}</p>
+            {existingSubmission.docPath && (
+              <p className="break-all">
+                <span className="font-medium text-foreground">Yuklangan fayl:</span> {existingSubmission.docPath}
+              </p>
+            )}
+          </div>
+          <Button className="w-full h-12 rounded-xl text-sm font-medium" onClick={() => setEditingExisting(true)}>
+            Tahrirlash
+          </Button>
         </div>
       </div>
     )
@@ -438,6 +498,11 @@ export function SubmissionForm() {
                     <p className="mt-2 text-xs text-muted-foreground">
                       Bitta .zip yuklang: Ariza, Universitet tasdiqlovchi hujjat, portfolio.
                     </p>
+                    {existingSubmission?.docPath && (
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        Hozirgi fayl: {existingSubmission.docPath}
+                      </p>
+                    )}
                     {documentValue && (
                       <p className="mt-2 text-xs text-foreground">
                         Tanlandi: {documentValue.name}
