@@ -154,7 +154,8 @@ export function SubmissionForm() {
       setIsSubmitted(true)
     } catch (err) {
       console.error(err)
-      setError(err instanceof Error ? err.message : "Xatolik yuz berdi. Iltimos, qayta urinib ko'ring.")
+      const friendly = err instanceof Error ? err.message : "Xatolik yuz berdi. Iltimos, qayta urinib ko'ring."
+      setError(friendly)
     } finally {
       setIsSubmitting(false)
     }

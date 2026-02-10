@@ -74,21 +74,20 @@ export async function POST(request: Request) {
       }
       telegramUserId = userId
 
-      if (telegramUserId) {
-        const { data: existing, error: selectError } = await supabase
-          .from("document_submissions")
-          .select("id")
-          .eq("telegram_chat_id", telegramUserId)
-          .limit(1)
+      // Hard block duplicates server-side
+      const { data: existing, error: selectError } = await supabase
+        .from("document_submissions")
+        .select("id")
+        .eq("telegram_chat_id", telegramUserId)
+        .limit(1)
 
-        if (selectError) {
-          console.error("Supabase select error", selectError)
-          return NextResponse.json({ message: "Tekshirishda xatolik" }, { status: 500 })
-        }
+      if (selectError) {
+        console.error("Supabase select error", selectError)
+        return NextResponse.json({ message: "Tekshirishda xatolik" }, { status: 500 })
+      }
 
-        if (existing && existing.length > 0) {
-          return NextResponse.json({ message: "Bu Telegram hisobidan allaqachon yuborilgan" }, { status: 409 })
-        }
+      if (existing && existing.length > 0) {
+        return NextResponse.json({ message: "Siz allaqachon topshirdingiz" }, { status: 409 })
       }
     }
 
