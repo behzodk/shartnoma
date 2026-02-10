@@ -25,7 +25,8 @@ function validateTelegramInitData(initData: string, botToken: string) {
     })
     const dataCheckString = pairs.sort().join("\n")
 
-    const secret = crypto.createHash("sha256").update(botToken).digest()
+    // Telegram WebApp: secret key = HMAC_SHA256("WebAppData", botToken)
+    const secret = crypto.createHmac("sha256", "WebAppData").update(botToken).digest()
     const computed = crypto.createHmac("sha256", secret).update(dataCheckString).digest("hex")
 
     const valid =
