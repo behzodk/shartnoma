@@ -81,7 +81,7 @@ export function SubmissionForm() {
     handleSubmit,
     trigger,
     setValue,
-    setError,
+    setError: setFieldError,
     watch,
     formState: { errors },
   } = useForm<FormData>({
@@ -141,7 +141,7 @@ export function SubmissionForm() {
     setIsSubmitting(true)
 
     if (!existingSubmission && !_data.document) {
-      setError("document", { type: "manual", message: "Fayl yuklang" })
+      setFieldError("document", { type: "manual", message: "Fayl yuklang" })
       setIsSubmitting(false)
       return
     }
