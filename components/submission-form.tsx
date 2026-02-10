@@ -59,6 +59,8 @@ export function SubmissionForm() {
   const [initData, setInitData] = useState<string | null>(null)
   const [telegramUserId, setTelegramUserId] = useState<number | null>(null)
   const [isTelegram, setIsTelegram] = useState(false)
+  const [tgReady, setTgReady] = useState(false)
+  const [scriptLoaded, setScriptLoaded] = useState(false)
 
   const {
     register,
@@ -81,34 +83,50 @@ export function SubmissionForm() {
   const documentValue = watch("document")
   const documentRegister = register("document")
 
-  // Detect Telegram WebApp context
+  // Detect Telegram WebApp context (retry while the SDK becomes available)
   useEffect(() => {
-    const tg = window.Telegram?.WebApp
-    if (!tg) return
+    const initTelegram = () => {
+      const tg = window.Telegram?.WebApp
+      if (!tg) return false
 
-    tg.ready()
-    tg.expand()
-    setIsTelegram(true)
-    setInitData(tg.initData || null)
-    const uid = tg.initDataUnsafe?.user?.id
-    setTelegramUserId(typeof uid === "number" ? uid : null)
+      tg.ready()
+      tg.expand()
+      setIsTelegram(true)
+      setInitData(tg.initData || null)
+      const uid = tg.initDataUnsafe?.user?.id
+      setTelegramUserId(typeof uid === "number" ? uid : null)
+      setTgReady(true)
 
-    // Apply optional theme colors to keep closer to Telegram look without breaking web
-    if (tg.themeParams) {
-      const root = document.documentElement
-      if (tg.themeParams.bg_color) root.style.setProperty("--tg-bg-color", tg.themeParams.bg_color)
-      if (tg.themeParams.text_color) root.style.setProperty("--tg-text-color", tg.themeParams.text_color)
-      if (tg.themeParams.button_color) root.style.setProperty("--tg-button-color", tg.themeParams.button_color)
-      if (tg.themeParams.button_text_color)
-        root.style.setProperty("--tg-button-text-color", tg.themeParams.button_text_color)
+      if (tg.themeParams) {
+        const root = document.documentElement
+        if (tg.themeParams.bg_color) root.style.setProperty("--tg-bg-color", tg.themeParams.bg_color)
+        if (tg.themeParams.text_color) root.style.setProperty("--tg-text-color", tg.themeParams.text_color)
+        if (tg.themeParams.button_color) root.style.setProperty("--tg-button-color", tg.themeParams.button_color)
+        if (tg.themeParams.button_text_color)
+          root.style.setProperty("--tg-button-text-color", tg.themeParams.button_text_color)
+      }
+      return true
     }
-  }, [])
+
+    if (!scriptLoaded) return
+    if (initTelegram()) return
+
+    const interval = setInterval(() => {
+      if (initTelegram()) clearInterval(interval)
+    }, 250)
+    const timeout = setTimeout(() => clearInterval(interval), 4000)
+    return () => {
+      clearInterval(interval)
+      clearTimeout(timeout)
+    }
+  }, [scriptLoaded])
 
   const telegramStatus = useMemo(() => {
+    if (isTelegram && !tgReady) return "Telegram yuklanmoqda…"
     if (isTelegram && telegramUserId) return `Telegram foydalanuvchisi: ${telegramUserId}`
     if (isTelegram) return "Telegram ochildi, foydalanuvchi aniqlanmadi"
     return "Telegram orqali ochilmagan — vebda yuborishingiz mumkin"
-  }, [isTelegram, telegramUserId])
+  }, [isTelegram, telegramUserId, tgReady])
 
   const onSubmit = async (_data: FormData) => {
     setError(null)
@@ -181,7 +199,11 @@ export function SubmissionForm() {
     <div className="flex min-h-[100svh] items-center justify-center bg-background p-3 sm:p-4">
       <div className="flex w-full max-w-md flex-col gap-6">
         <FormHeader />
-        <Script src="https://telegram.org/js/telegram-web-app.js" strategy="afterInteractive" />
+        <Script
+          src="https://telegram.org/js/telegram-web-app.js"
+          strategy="afterInteractive"
+          onLoad={() => setScriptLoaded(true)}
+        />
 
         <div className="rounded-2xl border border-border bg-card p-6 shadow-lg shadow-foreground/5">
           <div className="flex flex-col gap-6">
@@ -206,7 +228,7 @@ export function SubmissionForm() {
                 )}
               >
                 <span>{telegramStatus}</span>
-                {isTelegram && !initData && (
+                {isTelegram && tgReady && !initData && (
                   <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">
                     Telegram sessiyasi aniqlanmadi. Ilovani qayta oching yoki ruxsat bering.
                   </p>
@@ -419,7 +441,7 @@ export function SubmissionForm() {
                 ) : (
                   <Button
                     type="submit"
-                    disabled={isSubmitting || (isTelegram && !initData)}
+                    disabled={isSubmitting || (isTelegram && tgReady && !initData)}
                     className="h-12 flex-1 rounded-xl text-sm font-medium"
                   >
                     {isSubmitting ? (
