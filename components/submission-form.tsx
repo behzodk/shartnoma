@@ -1,10 +1,11 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 import { ArrowRight, ArrowLeft, Check, User, GraduationCap, Loader2, Upload } from "lucide-react"
+import Script from "next/script"
 
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -19,6 +20,20 @@ import {
 import { StepIndicator } from "@/components/step-indicator"
 import { FormHeader } from "@/components/form-header"
 import { cn } from "@/lib/utils"
+
+type TelegramWebApp = {
+  ready: () => void
+  expand: () => void
+  initData?: string
+  initDataUnsafe?: { user?: { id?: number } }
+  themeParams?: Partial<Record<"bg_color" | "text_color" | "button_color" | "button_text_color", string>>
+}
+
+declare global {
+  interface Window {
+    Telegram?: { WebApp?: TelegramWebApp }
+  }
+}
 
 const formSchema = z.object({
   firstName: z.string().min(2, "Ism kamida 2 ta harf bo'lishi kerak"),
@@ -41,6 +56,10 @@ export function SubmissionForm() {
   const [isSubmitted, setIsSubmitted] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [initData, setInitData] = useState<string | null>(null)
+  const [telegramUserId, setTelegramUserId] = useState<number | null>(null)
+  const [isTelegram, setIsTelegram] = useState(false)
+  const [webOverride, setWebOverride] = useState(false)
 
   const {
     register,
@@ -63,6 +82,35 @@ export function SubmissionForm() {
   const documentValue = watch("document")
   const documentRegister = register("document")
 
+  // Detect Telegram WebApp context
+  useEffect(() => {
+    const tg = window.Telegram?.WebApp
+    if (!tg) return
+
+    tg.ready()
+    tg.expand()
+    setIsTelegram(true)
+    setInitData(tg.initData || null)
+    const uid = tg.initDataUnsafe?.user?.id
+    setTelegramUserId(typeof uid === "number" ? uid : null)
+
+    // Apply optional theme colors to keep closer to Telegram look without breaking web
+    if (tg.themeParams) {
+      const root = document.documentElement
+      if (tg.themeParams.bg_color) root.style.setProperty("--tg-bg-color", tg.themeParams.bg_color)
+      if (tg.themeParams.text_color) root.style.setProperty("--tg-text-color", tg.themeParams.text_color)
+      if (tg.themeParams.button_color) root.style.setProperty("--tg-button-color", tg.themeParams.button_color)
+      if (tg.themeParams.button_text_color)
+        root.style.setProperty("--tg-button-text-color", tg.themeParams.button_text_color)
+    }
+  }, [])
+
+  const telegramStatus = useMemo(() => {
+    if (isTelegram && telegramUserId) return `Telegram foydalanuvchisi: ${telegramUserId}`
+    if (isTelegram) return "Telegram ochildi, foydalanuvchi aniqlanmadi"
+    return "Telegram orqali ochilmagan"
+  }, [isTelegram, telegramUserId])
+
   const onSubmit = async (_data: FormData) => {
     setError(null)
     setIsSubmitting(true)
@@ -74,6 +122,7 @@ export function SubmissionForm() {
       formData.append("university", _data.university)
       formData.append("program", _data.program)
       formData.append("document", _data.document)
+      formData.append("initData", initData || "")
 
       const response = await fetch("/api/document-submissions", {
         method: "POST",
@@ -111,7 +160,7 @@ export function SubmissionForm() {
 
   if (isSubmitted) {
     return (
-      <div className="flex min-h-svh items-center justify-center bg-background p-4">
+      <div className="flex min-h-[100svh] items-center justify-center bg-background p-4">
         <div className="flex w-full max-w-md flex-col items-center gap-6 rounded-2xl border border-border bg-card p-8 shadow-lg shadow-foreground/5">
           <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
             <Check className="h-8 w-8 text-primary" />
@@ -130,9 +179,10 @@ export function SubmissionForm() {
   }
 
   return (
-    <div className="flex min-h-svh items-center justify-center bg-background p-4">
+    <div className="flex min-h-[100svh] items-center justify-center bg-background p-3 sm:p-4">
       <div className="flex w-full max-w-md flex-col gap-6">
         <FormHeader />
+        <Script src="https://telegram.org/js/telegram-web-app.js" strategy="afterInteractive" />
 
         <div className="rounded-2xl border border-border bg-card p-6 shadow-lg shadow-foreground/5">
           <div className="flex flex-col gap-6">
@@ -148,6 +198,36 @@ export function SubmissionForm() {
             <StepIndicator currentStep={step} totalSteps={3} />
 
             <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-5">
+              <input type="hidden" name="initData" value={initData ?? ""} />
+
+              <div
+                className={cn(
+                  "rounded-xl border border-dashed border-border/70 bg-muted/40 px-4 py-3 text-xs text-muted-foreground",
+                  isTelegram ? "border-emerald-500/60 text-emerald-700 dark:text-emerald-300" : "border-amber-500/60"
+                )}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span>{telegramStatus}</span>
+                  {!isTelegram && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="h-8 px-3 text-xs"
+                      onClick={() => setWebOverride(true)}
+                    >
+                      Vebda davom etish
+                    </Button>
+                  )}
+                </div>
+                {!isTelegram && !webOverride && (
+                  <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">
+                    Iltimos, formani Telegram ichida oching. Zarurat bo'lsa, yuqoridagi tugma orqali vebda davom
+                    etishingiz mumkin.
+                  </p>
+                )}
+              </div>
+
               {/* Step 1: Personal Info */}
               <div
                 className={cn(
@@ -354,7 +434,7 @@ export function SubmissionForm() {
                 ) : (
                   <Button
                     type="submit"
-                    disabled={isSubmitting}
+                    disabled={isSubmitting || (!isTelegram && !webOverride)}
                     className="h-12 flex-1 rounded-xl text-sm font-medium"
                   >
                     {isSubmitting ? (
